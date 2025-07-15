@@ -1,2 +1,14 @@
-# deadzone-seeking-drone
-Code for drone equipped with cellular modules in order to detect poor/little cellular data signal strength
+# 📡 Cellular Signal Quality Logger & Visualizer
+
+This project logs cellular module signal quality data while in motion (e.g., on a drone) and visualizes it on a map using Python. It is useful for testing coverage, handoff behavior, and connectivity in mobile scenarios.
+
+---
+
+## 🧰 Features
+
+- Logs signal quality (RSSI, RSRP, RSRQ, SINR) from cellular modules (e.g., SIM7600, SIM8200)
+- Logs GPS data (lat, lon, alt, timestamp)
+- Saves data to CSV or NetCDF format
+- Visualizes signal strength across geospatial locations using `matplotlib` and `Basemap`
+
+---
