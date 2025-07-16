@@ -13,4 +13,5 @@ This project logs cellular module signal quality data while in motion (e.g., on 
 
 ---
 
-- JACOB VARGHESE
+- JACOB VARGHESE edit w notepad++
+
