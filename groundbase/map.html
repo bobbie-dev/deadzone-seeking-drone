@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Polygon Grid Planner</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css" />
+  <style>
+    #map { height: 100vh; width: 100vw; }
+    .leaflet-draw-toolbar a {
+      width: 60px;
+      height: 60px;
+      line-height: 60px;
+      font-size: 40px;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
+
+  <!-- QWebChannel for PyQt communication -->
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+
+  <script>
+    // Initialize the map
+    const map = L.map('map').setView([30.2672, -97.7431], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    const drawnItems = new L.FeatureGroup();
+    map.addLayer(drawnItems);
+
+    const drawControl = new L.Control.Draw({
+      draw: {
+        polygon: true,
+        rectangle: false,
+        polyline: false,
+        marker: false,
+        circle: false,
+        circlemarker: false,
+      },
+      edit: {
+        featureGroup: drawnItems
+      }
+    });
+    map.addControl(drawControl);
+
+    let pyObj = null;
+
+    // QWebChannel setup
+    new QWebChannel(qt.webChannelTransport, function(channel) {
+      pyObj = channel.objects.pyObj;
+    });
+
+    // Handle draw events
+    map.on('draw:created', function (e) {
+      const layer = e.layer;
+      drawnItems.addLayer(layer);
+
+      if (layer instanceof L.Polygon && pyObj) {
+        const latlngs = layer.getLatLngs()[0]; // First ring of polygon
+        const coords = latlngs.map(p => [p.lat, p.lng]);
+        pyObj.sendPolygon(JSON.stringify(coords)); // Send to Python
+      }
+    });
+  </script>
+</body>
+</html>
