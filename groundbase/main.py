@@ -1,7 +1,6 @@
 import sys
 import json
-from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QVBoxLayout, QWidget, QPushButton, QSpinBox, QLabel
-from PyQt5.QtWidgets import QHBoxLayout, QSpacerItem, QSizePolicy
+from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QVBoxLayout, QWidget, QPushButton, QSpinBox, QLabel, QHBoxLayout, QSpacerItem, QSizePolicy
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWebChannel import QWebChannel
 from PyQt5.QtCore import QObject, pyqtSlot, QUrl

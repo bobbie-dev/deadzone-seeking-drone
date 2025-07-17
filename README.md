@@ -13,4 +13,7 @@ This project logs cellular module signal quality data while in motion (e.g., on 
 
 ---
 
-- JACOB VARGHESE
+## Groundbase Setup
+
+- Need to have python 3 & pip installed and working
+- ```pip install pyqt5 PyQtWebEngine shapely```
