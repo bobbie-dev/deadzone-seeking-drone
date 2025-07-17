@@ -91,8 +91,28 @@ class MainWindow(QMainWindow):
         right_panel.addWidget(self.spinner)
         right_panel.addSpacing(20)
         right_panel.addWidget(self.button_export)
-        right_panel.addWidget(self.button_send_to_drone)
+
+        # Add stretch to push button to bottom
         right_panel.addStretch()
+
+        # Create a horizontal layout to hold the button aligned right
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()  # Push button to the right
+
+        # Style the "Send To Drone" button red
+        self.button_send_to_drone.setStyleSheet("""
+            background-color: #d9534f;
+            color: white;
+            font-size: 16px;
+            padding: 6px;
+            border: none;
+            border-radius: 4px;
+        """)
+
+        button_layout.addWidget(self.button_send_to_drone)
+
+        # Add the button layout to the right panel
+        right_panel.addLayout(button_layout)
 
         # Add map and panel to main layout
         main_layout.addWidget(self.browser)
