@@ -33,6 +33,14 @@ class Bridge(QObject):
 
         self.waypoint_callback(waypoints)
 
+def apply_stylesheet(app, path="style.qss"):
+    try:
+        with open(path, "r") as f:
+            style = f.read()
+            app.setStyleSheet(style)
+    except FileNotFoundError:
+        print(f"Stylesheet {path} not found. Using default.")
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -49,9 +57,14 @@ class MainWindow(QMainWindow):
         self.browser.load(QUrl.fromLocalFile(os.getcwd()+"/map.html".replace("\\", "/")))
 
         # GUI Controls
+        # Waypoint
         self.waypoints = []
         self.button_export = QPushButton("Export .waypoints File")
         self.button_export.clicked.connect(self.export_waypoints)
+
+        # Send to Drone
+        self.button_send_to_drone = QPushButton("Send To Drone")
+        self.button_send_to_drone.clicked.connect(self.send_to_drone)
 
         self.label = QLabel("Waypoints:")
         self.spinner = QSpinBox()
@@ -78,6 +91,7 @@ class MainWindow(QMainWindow):
         right_panel.addWidget(self.spinner)
         right_panel.addSpacing(20)
         right_panel.addWidget(self.button_export)
+        right_panel.addWidget(self.button_send_to_drone)
         right_panel.addStretch()
 
         # Add map and panel to main layout
@@ -110,9 +124,14 @@ class MainWindow(QMainWindow):
                 for i, (lat, lon) in enumerate(self.waypoints):
                     f.write(f"{i}\t0\t16\t16\t0\t0\t0\t0\t{lat}\t{lon}\t20.0\t1\n")
             print(f"Saved to {filename}")
+    
+    def send_to_drone(self):
+        pass
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    apply_stylesheet(app)
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())

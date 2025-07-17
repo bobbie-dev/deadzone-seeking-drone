@@ -1,0 +1,94 @@
+/* Base app style */
+QWidget {
+    background-color: #1e1e1e;
+    color: #dcdcdc;
+    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+    font-size: 14px;
+}
+
+/* Buttons */
+QPushButton {
+    background-color: #2d2d30;
+    color: #ffffff;
+    border: 1px solid #3e3e42;
+    padding: 6px 12px;
+    border-radius: 5px;
+}
+
+QPushButton:hover {
+    background-color: #3e3e42;
+}
+
+QPushButton:pressed {
+    background-color: #0078d7;
+    color: #ffffff;
+}
+
+/* Labels */
+QLabel {
+    color: #dcdcdc;
+}
+
+/* Line edits (text input) */
+QLineEdit {
+    background-color: #252526;
+    border: 1px solid #3e3e42;
+    color: #ffffff;
+    padding: 4px;
+    border-radius: 4px;
+}
+
+/* Combo boxes */
+QComboBox {
+    background-color: #252526;
+    border: 1px solid #3e3e42;
+    color: #ffffff;
+    padding: 4px;
+    border-radius: 4px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #1e1e1e;
+    selection-background-color: #0078d7;
+}
+
+/* Scrollbars */
+QScrollBar:vertical, QScrollBar:horizontal {
+    background: #1e1e1e;
+    border: none;
+    width: 10px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+    background: #4b4b4b;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:hover {
+    background: #606060;
+}
+
+/* Group boxes */
+QGroupBox {
+    border: 1px solid #3e3e42;
+    margin-top: 6px;
+    padding: 10px;
+    border-radius: 5px;
+}
+
+QGroupBox:title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 3px;
+    color: #cccccc;
+}
+
+/* Tooltips */
+QToolTip {
+    background-color: #0078d7;
+    color: white;
+    border: none;
+    padding: 5px;
+    border-radius: 3px;
+}
