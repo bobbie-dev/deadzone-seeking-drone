@@ -18,8 +18,4 @@ This project logs cellular module signal quality data while in motion (e.g., on 
 
 - Need to have python 3 & pip installed and working
 - ```pip install pyqt5 PyQtWebEngine shapely```
-=======
-- JACOB VARGHESE edit w notepad++ hello im here
 
-
->>>>>>> 0d929f18d5ac30e546c8ed3db472e9a39b6c1aa4
