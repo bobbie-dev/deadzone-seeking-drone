@@ -1,5 +1,4 @@
-import sys
-import json
+import sys,json,os
 from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QVBoxLayout, QWidget, QPushButton, QSpinBox, QLabel, QHBoxLayout, QSpacerItem, QSizePolicy
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWebChannel import QWebChannel
@@ -47,7 +46,7 @@ class MainWindow(QMainWindow):
         self.channel.registerObject("pyObj", self.bridge)
         self.browser.page().setWebChannel(self.channel)
 
-        self.browser.load(QUrl.fromLocalFile("C:\\Users\\abdul\\OneDrive\\Desktop\\Projects\\deadzone-seeking-drone\\groundbase/map.html".replace("\\", "/")))
+        self.browser.load(QUrl.fromLocalFile(os.getcwd()+"/map.html".replace("\\", "/")))
 
         # GUI Controls
         self.waypoints = []
