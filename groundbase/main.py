@@ -1,9 +1,12 @@
-import sys,json,os
+import sys,json,os,time
 from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QVBoxLayout, QWidget, QPushButton, QSpinBox, QLabel, QHBoxLayout, QSpacerItem, QSizePolicy
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWebChannel import QWebChannel
-from PyQt5.QtCore import QObject, pyqtSlot, QUrl
+from PyQt5.QtCore import QObject, pyqtSlot, QUrl, QThread, pyqtSignal
 from shapely.geometry import Polygon
+from pymavlink import mavutil
+
+
 
 class Bridge(QObject):
     def __init__(self, waypoint_callback):
@@ -33,6 +36,40 @@ class Bridge(QObject):
 
         self.waypoint_callback(waypoints)
 
+class DronePositionThread(QThread):
+    position_update = pyqtSignal(float, float, float)  # lat, lon, alt
+
+    def __init__(self, port='COM4', baud=57600):
+        super().__init__()
+        self.port = port
+        self.baud = baud
+        self._running = True
+        self.master = None
+
+    def run(self):
+        from pymavlink import mavutil
+        try:
+            self.master = mavutil.mavlink_connection(self.port, baud=self.baud)
+            self.master.wait_heartbeat(timeout=10)
+        except Exception as e:
+            print(f"Drone connection error: {e}")
+            return
+        while self._running:
+            try:
+                msg = self.master.recv_match(type='GLOBAL_POSITION_INT', blocking=True, timeout=2)
+                if msg:
+                    lat = msg.lat / 1e7
+                    lon = msg.lon / 1e7
+                    alt = msg.alt / 1000
+                    self.position_update.emit(lat, lon, alt)
+            except Exception as e:
+                print(f"Error receiving drone position: {e}")
+                continue
+
+    def stop(self):
+        self._running = False
+        self.wait()
+
 def apply_stylesheet(app, path="style.qss"):
     try:
         with open(path, "r") as f:
@@ -54,23 +91,34 @@ class MainWindow(QMainWindow):
         self.channel.registerObject("pyObj", self.bridge)
         self.browser.page().setWebChannel(self.channel)
 
-        self.browser.load(QUrl.fromLocalFile(os.getcwd()+"/map.html".replace("\\", "/")))
-
+        self.browser.load(QUrl.fromLocalFile(os.path.join(os.getcwd(), "groundbase", "map.html").replace("\\", "/")))
         # GUI Controls
+
+        # Connect to Drone
+        self.button_connect_to_drone = QPushButton("Connect To Drone")
+        self.button_connect_to_drone.clicked.connect(self.connect_to_drone)
+
+
         # Waypoint
         self.waypoints = []
         self.button_export = QPushButton("Export .waypoints File")
         self.button_export.clicked.connect(self.export_waypoints)
 
+
         # Send to Drone
         self.button_send_to_drone = QPushButton("Send To Drone")
         self.button_send_to_drone.clicked.connect(self.send_to_drone)
+
 
         self.label = QLabel("Waypoints:")
         self.spinner = QSpinBox()
         self.spinner.setRange(3, 100)
         self.spinner.setValue(10)
         self.spinner.valueChanged.connect(self.set_waypoint_count)
+
+        # Add drone position label
+        self.label_position = QLabel("Drone Position: N/A")
+        self.label_position.setStyleSheet("font-size: 16px; color: #0074D9;")
 
         # Create layout containers
         main_layout = QHBoxLayout()
@@ -91,6 +139,8 @@ class MainWindow(QMainWindow):
         right_panel.addWidget(self.spinner)
         right_panel.addSpacing(20)
         right_panel.addWidget(self.button_export)
+        right_panel.addWidget(self.button_connect_to_drone)
+        right_panel.addWidget(self.label_position)
 
         # Add stretch to push button to bottom
         right_panel.addStretch()
@@ -123,6 +173,9 @@ class MainWindow(QMainWindow):
         container.setLayout(main_layout)
         self.setCentralWidget(container)
 
+        # Drone position thread
+        self.drone_thread = None
+
 
     def set_waypoint_count(self, value):
         self.bridge.num_waypoints = value
@@ -145,8 +198,26 @@ class MainWindow(QMainWindow):
                     f.write(f"{i}\t0\t16\t16\t0\t0\t0\t0\t{lat}\t{lon}\t20.0\t1\n")
             print(f"Saved to {filename}")
     
+    def update_drone_position(self, lat, lon, alt):
+        self.label_position.setText(f"Drone Position: Lat {lat:.7f}, Lon {lon:.7f}, Alt {alt:.2f} m")
+
+    def connect_to_drone(self):# Mavlink Setup 
+        print("Connecting to drone...")
+        if self.drone_thread is not None:
+            self.drone_thread.stop()
+            self.drone_thread = None
+        self.drone_thread = DronePositionThread(port='COM4', baud=57600)
+        self.drone_thread.position_update.connect(self.update_drone_position)
+        self.drone_thread.start()
+
+
     def send_to_drone(self):
         pass
+
+    def closeEvent(self, event):
+        if self.drone_thread is not None:
+            self.drone_thread.stop()
+        event.accept()
 
 
 if __name__ == "__main__":
