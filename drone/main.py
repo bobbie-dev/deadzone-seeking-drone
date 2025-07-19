@@ -1,5 +1,5 @@
 from pymavlink import mavutil
-import time, serial
+import time, serial, json, struct
 
 # Cellular Module Settings
 
@@ -33,6 +33,17 @@ def send_at_command(ser, command, response_timeout=2):
       time.sleep(response_timeout)
       response = ser.read_all().decode(errors='ignore')
       return response.strip()
+
+def send_drone_information(packet_num, rssi, rsrp, rsrq, sinr, cell_id, pci):
+      msg = struct.pack('!7i', packet_num, rssi, rsrp, rsrq, sinr, cell_id, pci)
+
+      master.mav.send(
+      mavutil.mavlink.MAVLink_custommsg_message(
+            Packet = f"{packet_num}".encode(),
+            Data = msg,  # Already bytes
+      )
+      )
+
 
 def main():
       ser = connect_to_cellular()
