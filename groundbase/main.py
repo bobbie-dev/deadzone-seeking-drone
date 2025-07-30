@@ -1,4 +1,4 @@
-import sys, time. struct
+import sys, time, struct
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QVBoxLayout, QWidget,
     QPushButton, QSpinBox, QLabel, QHBoxLayout, QMessageBox
@@ -143,9 +143,6 @@ class MainWindow(QMainWindow):
             ed.setWindowTitle("Error")
             ed.exec_()
 
-    def receive_information(self):  # Fixed typo: "recieve" -> "receive"
-        pass  # values = struct.unpack('!7i', received_data)
-        # packet_num, rssi, rsrp, rsrq, sinr, cell_id, pci = values
 
     def closeEvent(self, event):
         if self.drone_thread is not None:
