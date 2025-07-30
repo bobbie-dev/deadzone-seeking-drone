@@ -1,5 +1,4 @@
-import sys
-import time
+import sys, time. struct
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QVBoxLayout, QWidget,
     QPushButton, QSpinBox, QLabel, QHBoxLayout, QMessageBox
@@ -59,7 +58,7 @@ class DroneDataThread(QThread):
                 # Fixed: Use self.master instead of self.DronePositionThread.master
                 msg = self.master.recv_match(type='CUSTOM_MSG', blocking=True, timeout=2)
                 if msg:
-                    data = msg.Data.decode('utf-8')
+                    data = struct.unpack('!iiihhhhhhhI', msg)
                     self.data_received.emit(data)
             except Exception as e:
                 print(f"Error receiving data: {e}")
