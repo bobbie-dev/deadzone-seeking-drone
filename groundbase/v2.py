@@ -23,7 +23,7 @@ class DronePositionThread(QThread):
     position_update = pyqtSignal(float, float, float)  # lat, lon, alt
     connection_status = pyqtSignal(bool, str)  # connected, status_message
 
-    def __init__(self, port='COM4', baud=57600):
+    def __init__(self, port='COM3', baud=57600):
         super().__init__()
         self.port = port
         self.baud = baud
@@ -324,9 +324,10 @@ class CellularDataWidget(QWidget):
 class MapWidget(QWidget):
     def __init__(self):
         super().__init__()
-        self.setup_ui()
+        # Initialize data lists before setup_ui
         self.drone_positions = []
         self.cellular_data_points = []
+        self.setup_ui()
         
     def setup_ui(self):
         layout = QVBoxLayout()
