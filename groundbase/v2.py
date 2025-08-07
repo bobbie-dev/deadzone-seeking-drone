@@ -22,6 +22,8 @@ from PyQt5.QtWebEngineWidgets import QWebEngineView
 class DronePositionThread(QThread):
     position_update = pyqtSignal(float, float, float)  # lat, lon, alt
     connection_status = pyqtSignal(bool, str)  # connected, status_message
+    gps_info_update = pyqtSignal(dict)  # GPS status info
+    heartbeat_update = pyqtSignal(dict)  # Heartbeat info
 
     def __init__(self, port='COM4', baud=57600):
         super().__init__()
@@ -29,6 +31,7 @@ class DronePositionThread(QThread):
         self.baud = baud
         self._running = True
         self.master = None
+        self.last_position_time = 0
 
     def run(self):
         from pymavlink import mavutil
@@ -49,15 +52,76 @@ class DronePositionThread(QThread):
             
         while self._running:
             try:
-                msg = self.master.recv_match(type='GLOBAL_POSITION_INT', blocking=True, timeout=2)
+                # Listen for multiple message types that contain position data
+                msg = self.master.recv_match(type=[
+                    'GLOBAL_POSITION_INT', 'GPS_RAW_INT', 'GPS_STATUS', 
+                    'HEARTBEAT', 'SYS_STATUS', 'ATTITUDE', 'VFR_HUD'
+                ], blocking=True, timeout=2)
+                
                 if msg:
-                    lat = msg.lat / 1e7
-                    lon = msg.lon / 1e7
-                    alt = msg.alt / 1000
-                    self.position_update.emit(lat, lon, alt)
+                    msg_type = msg.get_type()
+                    current_time = time.time()
+                    
+                    if msg_type == 'GLOBAL_POSITION_INT':
+                        # Primary position source
+                        lat = msg.lat / 1e7
+                        lon = msg.lon / 1e7
+                        alt = msg.alt / 1000
+                        rel_alt = msg.relative_alt / 1000
+                        
+                        if lat != 0 or lon != 0:  # Valid position
+                            self.position_update.emit(lat, lon, alt)
+                            self.last_position_time = current_time
+                            print(f"GLOBAL_POSITION_INT: {lat:.7f}, {lon:.7f}, {alt:.1f}m")
+                    
+                    elif msg_type == 'GPS_RAW_INT':
+                        # Raw GPS data with satellite info
+                        gps_info = {
+                            'fix_type': msg.fix_type,
+                            'satellites_visible': msg.satellites_visible,
+                            'lat': msg.lat / 1e7 if msg.lat != 0 else None,
+                            'lon': msg.lon / 1e7 if msg.lon != 0 else None,
+                            'alt': msg.alt / 1000 if hasattr(msg, 'alt') else None,
+                            'eph': msg.eph / 100.0 if msg.eph != 65535 else None,  # GPS HDOP
+                            'epv': msg.epv / 100.0 if msg.epv != 65535 else None,  # GPS VDOP
+                            'vel': msg.vel / 100.0 if hasattr(msg, 'vel') else None,  # GPS speed
+                            'cog': msg.cog / 100.0 if hasattr(msg, 'cog') else None,  # Course over ground
+                        }
+                        self.gps_info_update.emit(gps_info)
+                        
+                        # Use GPS_RAW as backup position source if GLOBAL_POSITION_INT not available
+                        if (current_time - self.last_position_time > 5.0 and 
+                            gps_info['lat'] is not None and gps_info['lon'] is not None):
+                            print(f"Using GPS_RAW_INT: {gps_info['lat']:.7f}, {gps_info['lon']:.7f}")
+                            self.position_update.emit(gps_info['lat'], gps_info['lon'], gps_info['alt'] or 0)
+                    
+                    elif msg_type == 'HEARTBEAT':
+                        # System status from heartbeat
+                        heartbeat_info = {
+                            'type': msg.type,
+                            'autopilot': msg.autopilot,
+                            'base_mode': msg.base_mode,
+                            'custom_mode': msg.custom_mode,
+                            'system_status': msg.system_status,
+                            'armed': bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
+                        }
+                        self.heartbeat_update.emit(heartbeat_info)
+                    
+                    elif msg_type == 'GPS_STATUS':
+                        # Additional GPS satellite info
+                        gps_status = {
+                            'satellites_visible': msg.satellites_visible,
+                            'satellite_prn': list(msg.satellite_prn),
+                            'satellite_used': list(msg.satellite_used),
+                            'satellite_elevation': list(msg.satellite_elevation),
+                            'satellite_azimuth': list(msg.satellite_azimuth),
+                            'satellite_snr': list(msg.satellite_snr)
+                        }
+                        self.gps_info_update.emit(gps_status)
+                        
             except Exception as e:
                 if self._running:  # Only log if we're still supposed to be running
-                    print(f"Error receiving drone position: {e}")
+                    print(f"Error receiving drone data: {e}")
                 continue
 
     def stop(self):
@@ -343,7 +407,24 @@ class MapWidget(QWidget):
         controls.addWidget(self.export_map_btn)
         controls.addStretch()
         
-        layout.addLayout(controls)
+        # Add alternative map options
+        map_options = QHBoxLayout()
+        
+        self.map_provider_combo = QComboBox()
+        self.map_provider_combo.addItems([
+            'OpenStreetMap', 
+            'Satellite (Google)', 
+            'Terrain', 
+            'Stamen Toner',
+            'CartoDB Positron'
+        ])
+        self.map_provider_combo.currentTextChanged.connect(self.change_map_provider)
+        
+        map_options.addWidget(QLabel("Map Style:"))
+        map_options.addWidget(self.map_provider_combo)
+        map_options.addStretch()
+        
+        layout.addLayout(map_options)
         
         # Web view for map
         self.web_view = QWebEngineView()
@@ -356,7 +437,8 @@ class MapWidget(QWidget):
         self.clear_trail_btn.clicked.connect(self.clear_trail)
         self.export_map_btn.clicked.connect(self.export_map)
         
-        # Initialize map
+        # Initialize map with default location
+        self.current_map_style = 'OpenStreetMap'
         self.update_map()
     
     def update_drone_position(self, lat, lon, alt):
@@ -375,56 +457,167 @@ class MapWidget(QWidget):
             self.cellular_data_points.append(data)
             self.update_map()
     
+    def change_map_provider(self, provider):
+        """Change map tile provider"""
+        self.current_map_style = provider
+        self.update_map()
+    
+    def get_folium_tiles(self, provider):
+        """Get folium tile configuration for provider"""
+        if provider == 'OpenStreetMap':
+            return 'OpenStreetMap'
+        elif provider == 'Satellite (Google)':
+            return 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}'
+        elif provider == 'Terrain':
+            return 'Stamen Terrain'
+        elif provider == 'Stamen Toner':
+            return 'Stamen Toner'
+        elif provider == 'CartoDB Positron':
+            return 'CartoDB positron'
+        else:
+            return 'OpenStreetMap'
+
     def update_map(self):
-        """Update the folium map"""
-        # Default center
-        center_lat, center_lon = 29.5994, -95.6306  # Sugar Land, TX
+        """Update the folium map with enhanced styling"""
+        # Default center (Sugar Land, TX)
+        center_lat, center_lon = 29.5994, -95.6306
+        zoom_level = 15
         
         # Use drone position if available
         if self.drone_positions:
             latest_pos = self.drone_positions[-1]
             center_lat, center_lon = latest_pos['lat'], latest_pos['lon']
+            
+            # Auto-zoom based on trail length
+            if len(self.drone_positions) > 10:
+                lats = [pos['lat'] for pos in self.drone_positions]
+                lons = [pos['lon'] for pos in self.drone_positions]
+                lat_range = max(lats) - min(lats)
+                lon_range = max(lons) - min(lons)
+                max_range = max(lat_range, lon_range)
+                
+                if max_range > 0.01:  # > ~1km
+                    zoom_level = 13
+                elif max_range > 0.005:  # > ~500m
+                    zoom_level = 14
+                else:
+                    zoom_level = 16
         
-        # Create map
-        m = folium.Map(location=[center_lat, center_lon], zoom_start=15)
+        # Create map with selected style
+        tiles = self.get_folium_tiles(self.current_map_style)
         
-        # Add drone trail
+        if self.current_map_style == 'Satellite (Google)':
+            m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom_level)
+            folium.TileLayer(
+                tiles=tiles,
+                attr='Google',
+                name='Google Satellite',
+                overlay=False,
+                control=True
+            ).add_to(m)
+        else:
+            m = folium.Map(
+                location=[center_lat, center_lon], 
+                zoom_start=zoom_level,
+                tiles=tiles
+            )
+        
+        # Add drone trail with enhanced styling
         if len(self.drone_positions) > 1:
             trail_coords = [[pos['lat'], pos['lon']] for pos in self.drone_positions]
-            folium.PolyLine(trail_coords, color='blue', weight=3, opacity=0.7).add_to(m)
+            
+            # Color trail by altitude or time
+            if len(self.drone_positions) > 2:
+                # Create altitude-colored trail segments
+                for i in range(len(trail_coords)-1):
+                    start_alt = self.drone_positions[i]['alt']
+                    end_alt = self.drone_positions[i+1]['alt']
+                    avg_alt = (start_alt + end_alt) / 2
+                    
+                    # Color by altitude
+                    if avg_alt < 10:
+                        color = '#ff0000'  # Red for low altitude
+                    elif avg_alt < 50:
+                        color = '#ff8800'  # Orange for medium
+                    else:
+                        color = '#0088ff'  # Blue for high
+                    
+                    folium.PolyLine(
+                        [trail_coords[i], trail_coords[i+1]], 
+                        color=color, 
+                        weight=4, 
+                        opacity=0.8
+                    ).add_to(m)
+            else:
+                # Simple trail
+                folium.PolyLine(trail_coords, color='blue', weight=3, opacity=0.7).add_to(m)
         
-        # Add current drone position
+        # Add current drone position with enhanced marker
         if self.drone_positions:
             current = self.drone_positions[-1]
+            popup_text = f"""
+            <b>🛸 Drone Position</b><br>
+            Lat: {current['lat']:.7f}<br>
+            Lon: {current['lon']:.7f}<br>
+            Alt: {current['alt']:.1f}m<br>
+            Time: {datetime.fromtimestamp(current['time']).strftime('%H:%M:%S')}
+            """
+            
             folium.Marker(
                 [current['lat'], current['lon']], 
-                popup=f"Drone<br>Alt: {current['alt']:.1f}m<br>Time: {datetime.fromtimestamp(current['time']).strftime('%H:%M:%S')}",
-                icon=folium.Icon(color='red', icon='plane')
+                popup=folium.Popup(popup_text, max_width=200),
+                icon=folium.Icon(color='red', icon='plane', prefix='fa'),
+                tooltip="Current Drone Position"
             ).add_to(m)
         
-        # Add cellular data points
-        for data in self.cellular_data_points[-100:]:  # Show last 100 points
+        # Add cellular data points with enhanced styling
+        for i, data in enumerate(self.cellular_data_points[-100:]):  # Show last 100 points
             if 'latitude' in data and 'longitude' in data:
-                # Color code by signal strength
+                # Color code by signal strength with more granular colors
                 rssi = data.get('rssi', -999)
-                if rssi > -70:
-                    color = 'green'
-                elif rssi > -85:
-                    color = 'orange'
+                if rssi > -60:
+                    color = '#00ff00'  # Bright green - excellent
+                elif rssi > -70:
+                    color = '#80ff00'  # Light green - very good
+                elif rssi > -80:
+                    color = '#ffff00'  # Yellow - good
+                elif rssi > -90:
+                    color = '#ff8000'  # Orange - fair
+                elif rssi > -100:
+                    color = '#ff4000'  # Red-orange - poor
                 else:
-                    color = 'red'
+                    color = '#ff0000'  # Red - very poor
                 
-                popup_text = f"Cell Data<br>RSSI: {rssi}dBm<br>RSRP: {data.get('rsrp', 'N/A')}dBm<br>Cell ID: {data.get('cell_id', 'N/A')}"
+                popup_text = f"""
+                <b>📡 Cell Tower Data</b><br>
+                RSSI: {rssi}dBm<br>
+                RSRP: {data.get('rsrp', 'N/A')}dBm<br>
+                RSRQ: {data.get('rsrq', 'N/A')}dB<br>
+                Cell ID: {data.get('cell_id', 'N/A')}<br>
+                Time: {datetime.fromtimestamp(data['timestamp']).strftime('%H:%M:%S')}
+                """
+                
+                # Vary marker size by signal strength
+                radius = max(3, min(8, (rssi + 120) / 10))  # 3-8 pixel radius
                 
                 folium.CircleMarker(
                     [data['latitude'], data['longitude']],
-                    radius=5,
-                    popup=popup_text,
-                    color=color,
+                    radius=radius,
+                    popup=folium.Popup(popup_text, max_width=200),
+                    color='black',
+                    weight=1,
                     fill=True,
                     fillColor=color,
-                    fillOpacity=0.7
+                    fillOpacity=0.8,
+                    tooltip=f"RSSI: {rssi}dBm"
                 ).add_to(m)
+        
+        # Add scale and mini map
+        from folium import plugins
+        plugins.MiniMap(toggle_display=True).add_to(m)
+        
+        # Add coordinate display on click
+        m.add_child(folium.LatLngPopup())
         
         # Save to HTML and load in web view
         html_data = m._repr_html_()
@@ -552,14 +745,26 @@ class MainWindow(QMainWindow):
         connection_group.setLayout(connection_layout)
         left_layout.addWidget(connection_group)
         
-        # Drone Position
-        position_group = QGroupBox("Drone Position")
+        # Drone Position and GPS Status
+        position_group = QGroupBox("Drone Position & GPS Status")
         position_layout = QVBoxLayout()
         
         self.label_position = QLabel("Position: N/A")
         self.label_position.setStyleSheet("font-size: 12px; color: #0074D9;")
         
+        self.label_gps_status = QLabel("GPS: No Fix")
+        self.label_gps_status.setStyleSheet("font-size: 11px; color: #FF4136;")
+        
+        self.label_satellites = QLabel("Satellites: 0")
+        self.label_satellites.setStyleSheet("font-size: 11px; color: #FFDC00;")
+        
+        self.label_hdop = QLabel("HDOP: N/A")
+        self.label_hdop.setStyleSheet("font-size: 10px; color: #AAAAAA;")
+        
         position_layout.addWidget(self.label_position)
+        position_layout.addWidget(self.label_gps_status)
+        position_layout.addWidget(self.label_satellites)
+        position_layout.addWidget(self.label_hdop)
         position_group.setLayout(position_layout)
         left_layout.addWidget(position_group)
         
@@ -703,6 +908,8 @@ class MainWindow(QMainWindow):
         self.drone_thread = DronePositionThread(port=selected_port, baud=selected_baud)
         self.drone_thread.position_update.connect(self.update_drone_position)
         self.drone_thread.connection_status.connect(self.update_connection_status)
+        self.drone_thread.gps_info_update.connect(self.update_gps_info)
+        self.drone_thread.heartbeat_update.connect(self.update_heartbeat_info)
         self.drone_thread.start()
         
         self.button_connect.setEnabled(False)
@@ -777,6 +984,78 @@ class MainWindow(QMainWindow):
         self.label_position.setText(f"Lat: {lat:.7f}\nLon: {lon:.7f}\nAlt: {alt:.2f} m")
         self.map_widget.update_drone_position(lat, lon, alt)
         self.statusBar().showMessage(f"Position: {lat:.6f}, {lon:.6f}, {alt:.1f}m")
+        
+        # Log position updates for debugging
+        print(f"Position update: {lat:.7f}, {lon:.7f}, {alt:.2f}m")
+
+    def update_gps_info(self, gps_data):
+        """Update GPS status information"""
+        try:
+            # GPS Fix Type
+            fix_types = {
+                0: "No GPS",
+                1: "No Fix", 
+                2: "2D Fix",
+                3: "3D Fix",
+                4: "DGPS",
+                5: "RTK Float",
+                6: "RTK Fixed"
+            }
+            
+            if 'fix_type' in gps_data:
+                fix_type = gps_data['fix_type']
+                fix_text = fix_types.get(fix_type, f"Unknown ({fix_type})")
+                
+                # Color code GPS status
+                if fix_type >= 3:
+                    color = "#28a745"  # Green for 3D fix or better
+                elif fix_type >= 2:
+                    color = "#ffc107"  # Yellow for 2D fix
+                else:
+                    color = "#dc3545"  # Red for no fix
+                    
+                self.label_gps_status.setText(f"GPS: {fix_text}")
+                self.label_gps_status.setStyleSheet(f"font-size: 11px; color: {color}; font-weight: bold;")
+            
+            # Satellite count
+            if 'satellites_visible' in gps_data:
+                sat_count = gps_data['satellites_visible']
+                sat_color = "#28a745" if sat_count >= 8 else "#ffc107" if sat_count >= 4 else "#dc3545"
+                self.label_satellites.setText(f"Satellites: {sat_count}")
+                self.label_satellites.setStyleSheet(f"font-size: 11px; color: {sat_color}; font-weight: bold;")
+            
+            # HDOP (Horizontal Dilution of Precision)
+            if 'eph' in gps_data and gps_data['eph'] is not None:
+                hdop = gps_data['eph']
+                hdop_color = "#28a745" if hdop < 2 else "#ffc107" if hdop < 5 else "#dc3545"
+                self.label_hdop.setText(f"HDOP: {hdop:.2f}")
+                self.label_hdop.setStyleSheet(f"font-size: 10px; color: {hdop_color};")
+            
+            # If we have position data from GPS_RAW, use it as backup
+            if ('lat' in gps_data and 'lon' in gps_data and 
+                gps_data['lat'] is not None and gps_data['lon'] is not None):
+                alt = gps_data.get('alt', 0)
+                print(f"GPS_RAW position: {gps_data['lat']:.7f}, {gps_data['lon']:.7f}, {alt:.2f}m")
+                
+        except Exception as e:
+            print(f"Error updating GPS info: {e}")
+
+    def update_heartbeat_info(self, heartbeat_data):
+        """Update system status from heartbeat"""
+        try:
+            armed = heartbeat_data.get('armed', False)
+            system_status = heartbeat_data.get('system_status', 0)
+            
+            # You can add more heartbeat info display here if needed
+            # For now, just log armed status changes
+            if hasattr(self, '_last_armed_state') and self._last_armed_state != armed:
+                status = "ARMED" if armed else "DISARMED"
+                self.log_message(f"🛡️ System {status}")
+            
+            self._last_armed_state = armed
+            
+        except Exception as e:
+            print(f"Error updating heartbeat info: {e}")
 
     def handle_cellular_data(self, data):
         """Handle received cellular data"""
