@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QVBoxLayout, QWidget,
     QPushButton, QSpinBox, QLabel, QHBoxLayout, QMessageBox, QTextEdit,
     QGroupBox, QGridLayout, QTabWidget, QTableWidget, QTableWidgetItem,
-    QProgressBar, QFrame, QSplitter
+    QProgressBar, QFrame, QSplitter, QComboBox
 )
 from PyQt5.QtCore import QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QPixmap, QPainter, QPen, QBrush, QColor
@@ -23,7 +23,7 @@ class DronePositionThread(QThread):
     position_update = pyqtSignal(float, float, float)  # lat, lon, alt
     connection_status = pyqtSignal(bool, str)  # connected, status_message
 
-    def __init__(self, port='COM3', baud=57600):
+    def __init__(self, port='COM4', baud=57600):
         super().__init__()
         self.port = port
         self.baud = baud
@@ -514,6 +514,29 @@ class MainWindow(QMainWindow):
         self.connection_status_label = QLabel("Status: Disconnected")
         self.connection_status_label.setStyleSheet("color: red; font-weight: bold;")
         
+        # COM Port selection
+        port_layout = QHBoxLayout()
+        port_layout.addWidget(QLabel("COM Port:"))
+        
+        self.port_combo = QComboBox()
+        self.populate_com_ports()
+        port_layout.addWidget(self.port_combo)
+        
+        self.refresh_ports_btn = QPushButton("🔄")
+        self.refresh_ports_btn.setMaximumWidth(30)
+        self.refresh_ports_btn.setToolTip("Refresh COM ports")
+        self.refresh_ports_btn.clicked.connect(self.populate_com_ports)
+        port_layout.addWidget(self.refresh_ports_btn)
+        
+        # Baud rate selection
+        baud_layout = QHBoxLayout()
+        baud_layout.addWidget(QLabel("Baud Rate:"))
+        
+        self.baud_combo = QComboBox()
+        self.baud_combo.addItems(['9600', '14400', '19200', '38400', '57600', '115200', '230400', '460800', '921600'])
+        self.baud_combo.setCurrentText('57600')  # Default
+        baud_layout.addWidget(self.baud_combo)
+        
         self.button_connect = QPushButton("Connect To Drone")
         self.button_connect.clicked.connect(self.connect_to_drone)
         
@@ -522,6 +545,8 @@ class MainWindow(QMainWindow):
         self.button_disconnect.setEnabled(False)
         
         connection_layout.addWidget(self.connection_status_label)
+        connection_layout.addLayout(port_layout)
+        connection_layout.addLayout(baud_layout)
         connection_layout.addWidget(self.button_connect)
         connection_layout.addWidget(self.button_disconnect)
         connection_group.setLayout(connection_layout)
@@ -596,25 +621,98 @@ class MainWindow(QMainWindow):
         
         central_widget.setLayout(main_layout)
 
+    def populate_com_ports(self):
+        """Populate COM port dropdown with available ports"""
+        import serial.tools.list_ports
+        
+        current_selection = self.port_combo.currentText() if hasattr(self, 'port_combo') else None
+        
+        self.port_combo.clear()
+        
+        # Get available COM ports
+        available_ports = []
+        ports = serial.tools.list_ports.comports()
+        
+        for port in sorted(ports):
+            port_info = f"{port.device}"
+            if port.description and port.description != 'n/a':
+                port_info += f" ({port.description})"
+            available_ports.append((port.device, port_info))
+        
+        # Add ports to combo box
+        if available_ports:
+            for device, info in available_ports:
+                self.port_combo.addItem(info, device)  # Display name, actual device stored as data
+        else:
+            self.port_combo.addItem("No COM ports found", None)
+        
+        # Add manual entry option
+        self.port_combo.addItem("Manual Entry...", "MANUAL")
+        
+        # Restore previous selection if it still exists
+        if current_selection:
+            index = self.port_combo.findText(current_selection)
+            if index >= 0:
+                self.port_combo.setCurrentIndex(index)
+        
+        self.statusBar().showMessage(f"Found {len(available_ports)} COM ports")
+
+    def get_selected_port(self):
+        """Get the currently selected COM port"""
+        if self.port_combo.currentData() == "MANUAL":
+            # Show input dialog for manual entry
+            from PyQt5.QtWidgets import QInputDialog
+            port, ok = QInputDialog.getText(self, 'Manual COM Port Entry', 
+                                          'Enter COM port (e.g., COM4, /dev/ttyUSB0):')
+            if ok and port:
+                return port.strip()
+            else:
+                return None
+        elif self.port_combo.currentData() is None:
+            self.show_error("No COM port selected or available")
+            return None
+        else:
+            return self.port_combo.currentData()
+
+    def get_selected_baud(self):
+        """Get the currently selected baud rate"""
+        try:
+            return int(self.baud_combo.currentText())
+        except ValueError:
+            return 57600  # Default fallback
+
     def setup_status_bar(self):
         """Setup status bar"""
         self.statusBar().showMessage("Ready - Connect to drone to begin")
 
     def connect_to_drone(self):
         """Connect to drone"""
-        print("Connecting to drone...")
+        # Get selected port and baud rate
+        selected_port = self.get_selected_port()
+        if not selected_port:
+            return
+            
+        selected_baud = self.get_selected_baud()
+        
+        print(f"Connecting to drone on {selected_port} at {selected_baud} baud...")
         
         if self.drone_thread is not None:
             self.disconnect_from_drone()
         
-        self.drone_thread = DronePositionThread(port='COM4', baud=57600)
+        # Create new drone thread with selected parameters
+        self.drone_thread = DronePositionThread(port=selected_port, baud=selected_baud)
         self.drone_thread.position_update.connect(self.update_drone_position)
         self.drone_thread.connection_status.connect(self.update_connection_status)
         self.drone_thread.start()
         
         self.button_connect.setEnabled(False)
-        self.connection_status_label.setText("Status: Connecting...")
+        self.port_combo.setEnabled(False)
+        self.baud_combo.setEnabled(False)
+        self.refresh_ports_btn.setEnabled(False)
+        
+        self.connection_status_label.setText(f"Status: Connecting to {selected_port}...")
         self.connection_status_label.setStyleSheet("color: orange; font-weight: bold;")
+        self.statusBar().showMessage(f"Connecting to {selected_port} at {selected_baud} baud...")
 
     def disconnect_from_drone(self):
         """Disconnect from drone"""
@@ -629,6 +727,12 @@ class MainWindow(QMainWindow):
         self.drone_connected = False
         self.button_connect.setEnabled(True)
         self.button_disconnect.setEnabled(False)
+        
+        # Re-enable port selection controls
+        self.port_combo.setEnabled(True)
+        self.baud_combo.setEnabled(True)
+        self.refresh_ports_btn.setEnabled(True)
+        
         self.connection_status_label.setText("Status: Disconnected")
         self.connection_status_label.setStyleSheet("color: red; font-weight: bold;")
         self.statusBar().showMessage("Disconnected")
@@ -642,6 +746,9 @@ class MainWindow(QMainWindow):
             self.connection_status_label.setStyleSheet("color: green; font-weight: bold;")
             self.button_connect.setEnabled(False)
             self.button_disconnect.setEnabled(True)
+            self.port_combo.setEnabled(False)
+            self.baud_combo.setEnabled(False)
+            self.refresh_ports_btn.setEnabled(False)
             
             # Start cellular data thread
             if self.cellular_thread is None:
@@ -659,6 +766,9 @@ class MainWindow(QMainWindow):
             self.connection_status_label.setStyleSheet("color: red; font-weight: bold;")
             self.button_connect.setEnabled(True)
             self.button_disconnect.setEnabled(False)
+            self.port_combo.setEnabled(True)
+            self.baud_combo.setEnabled(True)
+            self.refresh_ports_btn.setEnabled(True)
             self.statusBar().showMessage(f"Connection failed: {message}")
             self.log_message(f"❌ Connection failed: {message}")
 
